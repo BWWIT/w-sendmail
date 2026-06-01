@@ -11,11 +11,20 @@ config-file to ensure system-status-mails will always be sent to the correct adm
 
 How to use:
 
-1: Download w-sendmail to `/usr/local/bin/`
+1: Download w-sendmail
+```
+wget -O "/usr/local/bin/w-sendmail" "https://github.com/BWWIT/w-sendmail/releases/download/release/w-sendmail"
+```
     
-2: Create a symbolic-link to sendmail: `ln -sf "/usr/local/bin/w-sendmail" "/usr/sbin/sendmail"`
+2: Create a symbolic-link to sendmail 
+```
+ln -sf "/usr/local/bin/w-sendmail" "/usr/sbin/sendmail"
+```
 
-3: Make w-sendmail executeable: `chmod +x "/usr/local/bin/w-sendmail"`
+3: Make w-sendmail executeable: 
+```
+chmod +x "/usr/local/bin/w-sendmail"
+```
 
 4: Create configfile `/etc/w-sendmail.conf` with these properties:
 ```
@@ -28,7 +37,10 @@ SMTP_USER = "xx"
 SMTP_PASSWORD = "xx"
 ```
 
-5: Make a test-mail: `echo -e "Subject: Hello World\n\nThis is body of testmail" | sendmail`
+5: Make a test-mail: 
+```
+echo -e "Subject: Hello World\n\nThis is body of testmail" | sendmail
+```
 
 6: Check the journal-log and your mailbox:
 ```
