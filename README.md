@@ -39,8 +39,13 @@ SMTP_PASSWORD = "xx"
 
 5: Make a test-mail: 
 ```
+# From shell:
 echo -e "Subject: Hello World\n\nThis is body of testmail" | sendmail
+
+# From mdadm monitor (modify the md-device-name):
+mdadm --monitor --test /dev/md127
 ```
+
 
 6: Check the journal-log and your mailbox:
 ```
