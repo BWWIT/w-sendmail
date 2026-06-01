@@ -1,0 +1,152 @@
+#!/usr/bin/env python3
+''' 
+Created by Brian Wengel, WIT, 1. june 2026 17:09
+This is a sendmail-script for system-status-mails, no MTA required.
+To- and From-addresses specified by the daemon will be overruled by the addresses specified in the config-file, 
+i.e. system-status-mails will always be sent to the correct administrator.
+
+How to use:
+    1: Create a symbolic, point sendmail to this script:
+        ln -sf "/usr/local/bin/w-sendmail" "/usr/sbin/sendmail"
+
+    2: Make w-sendmail executeable:
+        chmod +x "/usr/local/bin/w-sendmail"
+
+    2: Create configfile "/etc/w-sendmail.conf" with these properties:
+        TOADDR = "xx"
+        FROMADDR = "xx"
+        SMTP_SERVER = "xx"
+        SMTP_PORT = 587
+        USE_TLS = True
+        SMTP_USER = "xx"
+        SMTP_PASSWORD = "xx" 
+
+    3: Make a test-mail:
+        echo -e "Subject: Hello World\n\nThis is body of testmail" | sendmail
+
+    4: Check the journal-log and your mailbox:
+        journalctl -e
+        or for real-time update:
+        journalctl -f
+'''
+
+import sys
+import os
+import smtplib
+import time
+import syslog
+from email import message_from_string
+from email.utils import formatdate
+from datetime import datetime
+
+CFG_FILE = "/etc/w-sendmail.conf"
+TOADDR = ""
+FROMADDR = ""
+SMTP_SERVER = ""
+SMTP_USER = ""
+SMTP_PASSWORD = ""
+SMTP_PORT = ""
+USE_TLS = ""
+HOST = os.uname()[1]
+
+def write_log(msg, level=syslog.LOG_INFO): # syslog.LOG_ERR
+    syslog.openlog(ident='sendmail-relay', facility=syslog.LOG_MAIL)
+    syslog.syslog(level, msg)
+    syslog.closelog()
+
+def read_config(filepath):
+    props = {}
+    try:
+        with open(filepath, "r") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                key, value = line.split("=", 1)
+                
+                # Strip leading/trailing whitespace AND surrounding quotes
+                clean_value = value.strip().strip('"').strip("'")
+                
+                props[key.strip()] = clean_value
+        return props
+    except Exception as e:
+        write_log(f"Cannot read config-file {filepath}:  {e}\n", syslog.LOG_ERR)
+        sys.exit(1)
+
+def relay_email():
+    email_content = sys.stdin.read()
+    if not email_content.strip():
+        sys.exit(0)
+
+    try:
+        write_log(f"Preparing relay-mail..")
+        
+        # Parse message securely
+        msg = message_from_string(email_content)
+        subject = msg.get('Subject', '(no subject)')
+        
+        # Extract body safely
+        if msg.is_multipart():
+            body = msg.get_payload(0).get_payload(decode=True).decode('utf-8', errors='ignore')
+        else:
+            body = msg.get_payload(decode=True).decode('utf-8', errors='ignore')
+
+        # SMTP Connection
+        server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT, timeout=5)
+        server.starttls()
+               
+        if SMTP_USER and SMTP_PASSWORD:
+            server.login(SMTP_USER, SMTP_PASSWORD)
+
+        for header in ['From', 'To', 'Date', 'Return-Path', 'Message-ID']:
+            if header in msg:
+                del msg[header]
+
+        # Set headers:
+        msg['From'] = FROMADDR
+        msg['To'] = TOADDR
+        msg['Date'] = formatdate(localtime=True)
+        msg['Return-Path'] = f"<{FROMADDR}>"
+        msg['Message-ID'] = f"<{time.time()}.{os.getpid()}@{HOST}>"
+        if 'Content-Type' not in msg:
+            msg['Content-Type'] = "text/plain; charset=UTF-8"
+        if 'Content-Transfer-Encoding' not in msg:
+            msg['Content-Transfer-Encoding'] = "8bit"
+        if 'MIME-Version' not in msg:
+            msg['MIME-Version'] = '1.0'
+        if 'Auto-Submitted' not in msg:
+            msg['Auto-Submitted'] = 'auto-generated'
+        if 'X-Mailer' not in msg:
+            msg['X-Mailer'] = 'Debian-SRV10-Relay'
+        
+        write_log(f"Will now send mail to '{TOADDR}' subject '{subject}'..")
+
+        # DEBUG: Dump full copy of mail to disk:
+        # with open("/var/log/sendmail-dump.log", "a") as dump:
+            # dump.write(f"--- {datetime.now()} ---\n")
+            # dump.write(msg.as_string())
+            # dump.write("\n\n")
+
+        server.sendmail(FROMADDR, TOADDR, msg.as_string())
+        server.quit()
+        
+        write_log(f"Successfully sent!")
+        sys.exit(0)
+
+    except Exception as e:
+        write_log(f"Error: {e}", syslog.LOG_ERR)
+        sys.exit(1)
+
+if __name__ == "__main__":
+    # Load credentials into props
+    props = read_config(CFG_FILE)
+    # Set config-properties
+    TOADDR = props.get("TOADDR")
+    FROMADDR = props.get("FROMADDR")
+    SMTP_SERVER = props.get("SMTP_SERVER")
+    SMTP_USER = props.get("SMTP_USER")
+    SMTP_PASSWORD = props.get("SMTP_PASSWORD")
+    SMTP_PORT = props.get("SMTP_PORT")
+    USE_TLS = props.get("USE_TLS")
+    # Proceed to relay
+    relay_email()
