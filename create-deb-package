@@ -1,0 +1,110 @@
+# Variables
+debfile="/tmp/w-sendmail_1.0.0_all.deb"
+BuildFld="/tmp/w-sendmail-build/"
+BuildCfgFile="${BuildFld}etc/w-sendmail.conf"
+BuildBin="${BuildFld}usr/local/bin/w-sendmail"
+InstCfgFile="/etc/w-sendmail.conf"
+InstBin="/usr/local/bin/w-sendmail"
+scriptURL="https://github.com/BWWIT/w-sendmail/releases/download/release/w-sendmail"
+
+# Create folder structure
+mkdir -p "${BuildFld}DEBIAN"
+mkdir -p "${BuildFld}etc"
+mkdir -p "${BuildFld}usr/local/bin"
+
+# Create meta data
+cat << 'EOF' > "${BuildFld}DEBIAN/control" 
+Package: w-sendmail
+Version: 1.0.0
+Architecture: all
+Maintainer: Brian Wengel, WIT
+Depends: python3
+Provides: mail-transport-agent, sendmail
+Section: mail
+Priority: optional
+Description: Python3 script to mimic MTA/sendmail
+EOF
+
+# Register configfile
+echo "$InstCfgFile" > "${BuildFld}DEBIAN/conffiles"
+
+#Pre-install script (Run before files are been extracted)
+cat << EOF > "${BuildFld}DEBIAN/preinst"
+#!/bin/sh
+set -e
+if [ "\$1" = "install" ] || [ "\$1" = "upgrade" ]; then
+    echo "w-sendmail: Running pre-installation checks..."
+
+    # 1. Safety check: Check for an existing physical MTA binary
+    if [ -f "/usr/sbin/sendmail" ] && [ ! -L "/usr/sbin/sendmail" ]; then
+        echo "ERROR: sendmail already exist, an existing MTA (like Exim or Postfix) might be installed." >&2
+        echo "Please back up and remove it before installing w-sendmail." >&2
+        exit 1
+    fi
+
+    # 2. Backup check: If config exists, back it up with a clean timestamp
+    if [ -f "${InstCfgFile}" ]; then
+        TIMESTAMP=\$(date +%Y%m%d-%H%M%S)
+        BACKUP_FILE="${InstCfgFile}.\${TIMESTAMP}.old"
+        
+        echo "w-sendmail: Existing config-file found (${InstCfgFile}), creating safety backup..."
+        cp -p "$InstCfgFile" "\$BACKUP_FILE"
+        
+        # Lock down the permissions of the backup file immediately since it contains secrets
+        chmod 600 "\$BACKUP_FILE"
+        echo "w-sendmail: Backup saved to \$BACKUP_FILE"
+    fi
+fi
+exit 0
+EOF
+
+#Post-install Script (Run after files has been extracted)
+cat << EOF > "${BuildFld}DEBIAN/postinst"
+#!/bin/sh
+set -e
+if [ "\$1" = "configure" ]; then
+    # Ensure execution permissions
+    chmod 755 "${InstBin}"
+    
+    # Create symlink to mimic standard sendmail path
+    ln -sf "${InstBin}" "/usr/sbin/sendmail"
+fi
+exit 0
+EOF
+
+# Post-Removal Script (remove symlink when package is uninstalled)
+cat << EOF > "${BuildFld}DEBIAN/postrm"
+#!/bin/sh
+set -e
+if [ "$1" = "remove" ] || [ "$1" = "purge" ]; then
+    if [ -L /usr/sbin/sendmail ]; then
+        rm -f /usr/sbin/sendmail
+    fi
+fi
+echo "Be aware configfile \"${InstCfgFile}\" might contain secrets, consider delete it!"
+exit 0
+EOF
+
+# Populate script and Config File
+wget -O "$BuildBin" "${scriptURL}"
+
+cat <<'EOF' > "$BuildCfgFile"
+TOADDR = "xx"
+FROMADDR = "xx"
+SMTP_SERVER = "xx"
+SMTP_PORT = "587"
+USE_TLS = "True"
+SMTP_USER = "xx"
+SMTP_PASSWORD = "xx"
+EOF
+
+# Set Permissions and Build
+chown -R root:root "${BuildFld}"
+chmod 755 "${BuildFld}DEBIAN/preinst"
+chmod 755 "${BuildFld}DEBIAN/postinst"
+chmod 755 "${BuildFld}DEBIAN/postrm"
+
+dpkg-deb --build "${BuildFld}" "$debfile"
+
+
+
